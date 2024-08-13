@@ -12,11 +12,8 @@ jobs:
     steps:
     - name: Checkout Repository
       uses: actions/checkout@v3
-
-    - name: Verify Commit
-      run: |
-        echo "Changed files:"
-        git diff --name-only HEAD^ HEAD
+      with:
+        fetch-depth: 2  # Ensure at least 2 commits are fetched
 
     - name: Read Configuration
       id: read_config
@@ -49,7 +46,13 @@ jobs:
       id: changed_files
       run: |
         git fetch origin
-        changed_files=$(git diff --name-only HEAD^ HEAD | grep '^domain_1/' | grep -v '^domain_1/config.json$')
+        latest_commit=$(git rev-parse HEAD)
+        previous_commit=$(git rev-parse HEAD^ || echo "no_previous_commit")
+        if [ "$previous_commit" != "no_previous_commit" ]; then
+          changed_files=$(git diff --name-only $previous_commit $latest_commit | grep '^domain_1/' | grep -v '^domain_1/config.json$')
+        else
+          changed_files=""
+        fi
         echo "CHANGED_FILES=$changed_files" >> $GITHUB_ENV
 
     - name: Create and Activate Pipeline Versions
@@ -73,4 +76,5 @@ jobs:
               --header "Authorization: Bearer ${{ env.TOKEN }}"
           fi
         done
+
 
