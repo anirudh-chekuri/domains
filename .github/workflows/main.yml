@@ -3,7 +3,7 @@ name: Create and Activate Pipeline Version
 on:
   push:
     paths:
-      - 'domain_1/**/*.sql'
+      - 'domain_1/**'
 
 jobs:
   trigger_pipeline:
@@ -13,13 +13,23 @@ jobs:
     - name: Checkout Repository
       uses: actions/checkout@v3
 
+    - name: Verify Commit
+      run: |
+        echo "Changed files:"
+        git diff --name-only HEAD^ HEAD
+
     - name: Read Configuration
       id: read_config
       run: |
-        domain_id=$(grep 'domainid=' domain_1/config.json | cut -d'=' -f2)
-        host=$(grep 'host=' domain_1/config.json | cut -d'=' -f2)
-        echo "DOMAIN_ID=$domain_id" >> $GITHUB_ENV
-        echo "HOST=$host" >> $GITHUB_ENV
+        if [ -f domain_1/config.json ]; then
+          domain_id=$(grep 'domainid=' domain_1/config.json | cut -d'=' -f2)
+          host=$(grep 'host=' domain_1/config.json | cut -d'=' -f2)
+          echo "DOMAIN_ID=$domain_id" >> $GITHUB_ENV
+          echo "HOST=$host" >> $GITHUB_ENV
+        else
+          echo "Configuration file not found!"
+          exit 1
+        fi
 
     - name: Get Authentication Token
       id: auth
@@ -35,20 +45,18 @@ jobs:
           --header "Authorization: Bearer ${{ env.TOKEN }}" | jq -r '.result[] | {id: .id, name: .name}')
         echo "$pipelines" > pipelines.json
 
-    - name: Determine Changed SQL Files
+    - name: Determine Changed Files
       id: changed_files
       run: |
         git fetch origin
-        # Exclude config.json from the list of changed files
-        changed_files=$(git diff --name-only HEAD^ HEAD | grep '^domain_1/.*\.sql$' | grep -v '^domain_1/config.json$')
+        changed_files=$(git diff --name-only HEAD^ HEAD | grep '^domain_1/' | grep -v '^domain_1/config.json$')
         echo "CHANGED_FILES=$changed_files" >> $GITHUB_ENV
 
     - name: Create and Activate Pipeline Versions
       run: |
         for file in $CHANGED_FILES; do
           # Extract pipeline name from the file path
-          pipeline_path=$(dirname "$file")
-          pipeline_name=$(basename "$pipeline_path")
+          pipeline_name=$(basename "$file")
           
           # Map pipeline names to IDs
           pipeline_id=$(jq -r --arg name "$pipeline_name" '.[] | select(.name == $name) | .id' pipelines.json)
@@ -65,3 +73,4 @@ jobs:
               --header "Authorization: Bearer ${{ env.TOKEN }}"
           fi
         done
+
