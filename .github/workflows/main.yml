@@ -34,13 +34,14 @@ jobs:
         response=$(curl -k --location "https://${{ env.HOST }}/v3/security/authenticate" \
           --header 'Authorization: Basic ${{ secrets.REFRESH_TOKEN }}')
         echo "TOKEN=$(echo $response | jq -r '.result.authentication_token')" >> $GITHUB_ENV
+        echo $TOKEN
 
     - name: Fetch Pipeline IDs
       id: fetch_pipeline_ids
       run: |
-        pipelines=$(curl -k --location "https://${{ env.HOST }}/v3/domains/${{ env.DOMAIN_ID }}/pipelines" \
-          --header "Authorization: Bearer ${{ env.TOKEN }}" | jq -r '.result[] | {id: .id, name: .name}')
-        echo "$pipelines" > pipelines.json
+        response=$(curl -k --location "https://${{ env.HOST }}/v3/domains/${{ env.DOMAIN_ID }}/pipelines" \
+         --header "Authorization: Bearer ${{ env.TOKEN }}")
+         echo "API Response: $response"
 
     - name: Determine Changed Files
       id: changed_files
