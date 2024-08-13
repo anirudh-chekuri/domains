@@ -18,9 +18,9 @@ jobs:
     - name: Read Configuration
       id: read_config
       run: |
-        if [ -f domain_1/config.json ]; then
-          domain_id=$(grep 'domainid=' domain_1/config.json | cut -d'=' -f2)
-          host=$(grep 'host=' domain_1/config.json | cut -d'=' -f2)
+        if [ -f domain_1/config.txt ]; then
+          domain_id=$(grep 'domainid=' domain_1/config.txt | cut -d'=' -f2)
+          host=$(grep 'host=' domain_1/config.txt | cut -d'=' -f2)
           echo "DOMAIN_ID=$domain_id" >> $GITHUB_ENV
           echo "HOST=$host" >> $GITHUB_ENV
         else
