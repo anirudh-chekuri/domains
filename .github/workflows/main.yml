@@ -23,6 +23,7 @@ jobs:
           host=$(grep 'host=' domain_1/config.txt | cut -d'=' -f2)
           echo "DOMAIN_ID=$domain_id" >> $GITHUB_ENV
           echo "HOST=$host" >> $GITHUB_ENV
+          echo $GITHUB_ENV
         else
           echo "Configuration file not found!"
           exit 1
@@ -31,9 +32,10 @@ jobs:
     - name: Get Authentication Token
       id: auth
       run: |
-        response=$(curl -k --location "https://${{ env.HOST }}/v3/security/authenticate" \
+        response=$(curl -k --location "https://${{ env.HOST }}/v3/security/token/access" \
           --header 'Authorization: Basic ${{ secrets.REFRESH_TOKEN }}')
         echo "TOKEN=$(echo $response | jq -r '.result.authentication_token')" >> $GITHUB_ENV
+        echo $GITHUB_ENV
         echo $TOKEN
 
     - name: Fetch Pipeline IDs
