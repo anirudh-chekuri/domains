@@ -1,0 +1,27 @@
+name: Print Tokens
+
+on:
+  push:
+    paths:
+      - 'domain_1/**'
+
+jobs:
+  print_tokens:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 2
+
+      - name: Read Refresh Token
+        run: |
+          echo "Refresh Token: ${{ secrets.REFRESH_TOKEN }}"
+
+      - name: Get Authentication Token
+        run: |
+          response=$(curl -k --location "https://${{ secrets.HOST }}/v3/security/authenticate" \
+            --header 'Authorization: Basic ${{ secrets.REFRESH_TOKEN }}')
+          token=$(echo $response | jq -r '.result.authentication_token')
+          echo "Auth Token: $token"
