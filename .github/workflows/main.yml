@@ -31,14 +31,14 @@ jobs:
     - name: Get Authentication Token
       id: auth
       run: |
-        response=$(curl --location "https://${{ env.HOST }}/v3/security/authenticate" \
+        response=$(curl -k --location "https://${{ env.HOST }}/v3/security/authenticate" \
           --header 'Authorization: Basic ${{ secrets.REFRESH_TOKEN }}')
         echo "TOKEN=$(echo $response | jq -r '.result.authentication_token')" >> $GITHUB_ENV
 
     - name: Fetch Pipeline IDs
       id: fetch_pipeline_ids
       run: |
-        pipelines=$(curl --location "https://${{ env.HOST }}/v3/domains/${{ env.DOMAIN_ID }}/pipelines" \
+        pipelines=$(curl -k --location "https://${{ env.HOST }}/v3/domains/${{ env.DOMAIN_ID }}/pipelines" \
           --header "Authorization: Bearer ${{ env.TOKEN }}" | jq -r '.result[] | {id: .id, name: .name}')
         echo "$pipelines" > pipelines.json
 
