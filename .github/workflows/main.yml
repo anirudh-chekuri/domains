@@ -1,0 +1,67 @@
+name: Create and Activate Pipeline Version
+
+on:
+  push:
+    paths:
+      - 'domain_1/**/*.sql'
+
+jobs:
+  trigger_pipeline:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v3
+
+    - name: Read Configuration
+      id: read_config
+      run: |
+        domain_id=$(grep 'domainid=' domain_1/config.json | cut -d'=' -f2)
+        host=$(grep 'host=' domain_1/config.json | cut -d'=' -f2)
+        echo "DOMAIN_ID=$domain_id" >> $GITHUB_ENV
+        echo "HOST=$host" >> $GITHUB_ENV
+
+    - name: Get Authentication Token
+      id: auth
+      run: |
+        response=$(curl --location "https://${{ env.HOST }}/v3/security/authenticate" \
+          --header 'Authorization: Basic ${{ secrets.REFRESH_TOKEN }}')
+        echo "TOKEN=$(echo $response | jq -r '.result.authentication_token')" >> $GITHUB_ENV
+
+    - name: Fetch Pipeline IDs
+      id: fetch_pipeline_ids
+      run: |
+        pipelines=$(curl --location "https://${{ env.HOST }}/v3/domains/${{ env.DOMAIN_ID }}/pipelines" \
+          --header "Authorization: Bearer ${{ env.TOKEN }}" | jq -r '.result[] | {id: .id, name: .name}')
+        echo "$pipelines" > pipelines.json
+
+    - name: Determine Changed SQL Files
+      id: changed_files
+      run: |
+        git fetch origin
+        # Exclude config.json from the list of changed files
+        changed_files=$(git diff --name-only HEAD^ HEAD | grep '^domain_1/.*\.sql$' | grep -v '^domain_1/config.json$')
+        echo "CHANGED_FILES=$changed_files" >> $GITHUB_ENV
+
+    - name: Create and Activate Pipeline Versions
+      run: |
+        for file in $CHANGED_FILES; do
+          # Extract pipeline name from the file path
+          pipeline_path=$(dirname "$file")
+          pipeline_name=$(basename "$pipeline_path")
+          
+          # Map pipeline names to IDs
+          pipeline_id=$(jq -r --arg name "$pipeline_name" '.[] | select(.name == $name) | .id' pipelines.json)
+          if [ "$pipeline_id" != "null" ]; then
+            query=$(base64 < "$file")
+            create_response=$(curl -k --request POST \
+              --url "https://${{ env.HOST }}/v3/domains/${{ env.DOMAIN_ID }}/pipelines/$pipeline_id/versions" \
+              --header "Content-Type: application/json" \
+              --header "Authorization: Bearer ${{ env.TOKEN }}" \
+              --data "{\"pipeline_id\": \"$pipeline_id\", \"type\": \"sql\", \"query\": \"$query\"}")
+            pipeline_version_id=$(echo $create_response | jq -r '.result.id')
+            curl -k --request POST \
+              --url "https://${{ env.HOST }}/v3/domains/${{ env.DOMAIN_ID }}/pipelines/$pipeline_id/versions/$pipeline_version_id/set-active" \
+              --header "Authorization: Bearer ${{ env.TOKEN }}"
+          fi
+        done
