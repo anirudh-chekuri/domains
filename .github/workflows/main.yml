@@ -3,7 +3,7 @@ name: Trigger SQL Pipeline Update
 on:
   push:
     paths:
-      - 'domain_1/**/*.sql'
+      - 'domain_1/*.sql'
 
 jobs:
   update-pipeline:
