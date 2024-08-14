@@ -1,4 +1,4 @@
-eewefwwwsqqwfwefefwsfwsdgdswewsdwwwefwfveqvfqfwrgferwefwwewwefwewerwqwfewewshow databases;
+weewefwwwsqqwfwefefwsfwsdgdswewsdwwwefwfveqvfqfwrgferwefwwewwefwewerwqwfewewshow databases;
 eewshow tables;
 qq
 e
