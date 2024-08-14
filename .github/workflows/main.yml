@@ -1,10 +1,9 @@
-
 name: Trigger SQL Pipeline Update
 
 on:
   push:
     paths:
-      - 'domain_1/*.sql'
+      - 'domain_1/**'
 
 jobs:
   update-pipeline:
@@ -12,18 +11,15 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v2
-      with:
-        fetch-depth: 0
 
-    - name: Set up environment
+    - name: Load Configuration
+      id: load_config
       run: |
-        # Read domain_id and host from config.txt
-        DOMAIN_ID=$(grep '^domainid=' config.txt | cut -d'=' -f2)
-        HOST=$(grep '^host=' config.txt | cut -d'=' -f2)
+        DOMAIN_ID=$(grep '^domainid=' domain_1/config.txt | cut -d '=' -f 2)
+        HOST=$(grep '^host=' domain_1/config.txt | cut -d '=' -f 2)
+        echo "DOMAIN_ID=${DOMAIN_ID}" >> $GITHUB_ENV
+        echo "HOST=${HOST}" >> $GITHUB_ENV
         
-        echo "DOMAIN_ID=$DOMAIN_ID" >> $GITHUB_ENV
-        echo "HOST=$HOST" >> $GITHUB_ENV
-
     - name: Fetch token
       id: fetch_token
       run: |
