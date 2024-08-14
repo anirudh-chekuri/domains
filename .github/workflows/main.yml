@@ -1,76 +1,24 @@
-name: Trigger SQL Pipeline Update
+name: Print Changed Files
 
 on:
   push:
     branches:
-      - main
-    paths:
-      - 'domain_1/*.sql'  
+      - main  # You can change this to any branch you want to monitor
 
 jobs:
-  update-pipeline:
+  print-changed-files:
     runs-on: ubuntu-latest
-
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-      with:
-        fetch-depth: 2  # Fetch the full history to compare with previous commits
-        persist-credentials: true  # Ensure credentials are persisted
+      - name: Checkout code
+        uses: actions/checkout@v3
 
-    - name: Load Configuration
-      id: load_config
-      run: |
-        DOMAIN_ID=$(grep '^domainid=' domain_1/config.txt | cut -d '=' -f 2)
-        HOST=$(grep '^host=' domain_1/config.txt | cut -d '=' -f 2)
-        echo "DOMAIN_ID=${DOMAIN_ID}" >> $GITHUB_ENV
-        echo "HOST=${HOST}" >> $GITHUB_ENV
+      - name: Get changed files
+        id: changed-files
+        run: |
+          git diff --name-only HEAD~1 HEAD > changed_files.txt
+          cat changed_files.txt
 
-    - name: Fetch token
-      id: fetch_token
-      run: |
-        TOKEN_RESPONSE=$(curl -k --silent --location "https://${{ env.HOST }}/v3/security/token/access" \
-          --header "Authorization: Basic ${{ secrets.REFRESH_TOKEN }}")
-        echo "Token API Response: $TOKEN_RESPONSE"
-        TOKEN=$(echo $TOKEN_RESPONSE | jq -r '.result.authentication_token')
-        echo "TOKEN=$TOKEN" >> $GITHUB_ENV
-
-    - name: Get changed files
-      id: changed-files
-      uses: tj-actions/changed-files@v44
-      with:
-        files: |
-          domain_1/*.sql  # Matches all .sql files under domain_1, including subdirectories
-
-    - name: List changed files
-      if: steps.changed-files.outputs.all_changed_files != ''
-      run: |
-        echo "Changed SQL files:"
-        for file in ${{ steps.changed-files.outputs.all_changed_files }}; do
-          echo "$file"
-        done
-
-    - name: Process Existing Changed Files
-      if: steps.changed-files.outputs.all_changed_files != ''
-      run: |
-        for file in ${{ steps.changed-files.outputs.all_changed_files }}; do
-          pipeline_name=$(basename "$file" .sql)
-          pipeline_id=$(jq -r --arg name "$pipeline_name" '.[] | select(.name == $name) | .id' pipelines.json)
-          
-          if [ "$pipeline_id" != "null" ]; then
-            query=$(base64 < "$file")
-            create_response=$(curl -k --request POST \
-              --url "https://${{ env.HOST }}/v3/domains/${{ env.DOMAIN_ID }}/pipelines/$pipeline_id/versions" \
-              --header "Content-Type: application/json" \
-              --header "Authorization: Bearer ${{ env.TOKEN }}" \
-              --data "{\"pipeline_id\": \"$pipeline_id\", \"type\": \"sql\", \"query\": \"$query\"}")
-            
-            pipeline_version_id=$(echo $create_response | jq -r '.result.id')
-            
-            curl -k --request POST \
-              --url "https://${{ env.HOST }}/v3/domains/${{ env.DOMAIN_ID }}/pipelines/$pipeline_id/versions/$pipeline_version_id/set-active" \
-              --header "Authorization: Bearer ${{ env.TOKEN }}"
-          else
-            echo "Pipeline ID not found for $pipeline_name"
-          fi
-        done
+      - name: Display changed files
+        run: |
+          echo "Changed files:"
+          cat changed_files.txt
