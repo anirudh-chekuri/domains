@@ -1,4 +1,4 @@
-name: Trigger SQL Pipeline Update
+name: CI Pipeline
 
 on:
   push:
@@ -6,62 +6,36 @@ on:
       - 'domain_1/**'
 
 jobs:
-  update-pipeline:
+  process_changes:
     runs-on: ubuntu-latest
+
     steps:
     - name: Checkout code
-      uses: actions/checkout@v2
+      uses: actions/checkout@v3
+      with:
+        fetch-depth: 0 # Fetch all history to ensure HEAD^ works
 
-    - name: Load Configuration
-      id: load_config
-      run: |
-        DOMAIN_ID=$(grep '^domainid=' domain_1/config.txt | cut -d '=' -f 2)
-        HOST=$(grep '^host=' domain_1/config.txt | cut -d '=' -f 2)
-        echo "DOMAIN_ID=${DOMAIN_ID}" >> $GITHUB_ENV
-        echo "HOST=${HOST}" >> $GITHUB_ENV
+    - name: Fetch Full History
+      run: git fetch --unshallow || true
 
     - name: Determine Changed SQL Files
       id: changed_files
       run: |
-        git fetch origin
-        changed_files=$(git diff --name-only --diff-filter=M HEAD^ HEAD domain_1/ | grep '\.sql$')
+        # Get the latest commit and its parent
+        latest_commit=$(git rev-parse HEAD)
+        parent_commit=$(git rev-parse HEAD^)
+        
+        # Ensure we have valid commits to compare
+        if [ -z "$latest_commit" ] || [ -z "$parent_commit" ]; then
+          echo "Error: Unable to retrieve commits."
+          exit 1
+        fi
+
+        # Get the list of changed SQL files
+        changed_files=$(git diff --name-only --diff-filter=M $parent_commit $latest_commit domain_1/ | grep '\.sql$')
         echo "CHANGED_FILES=$changed_files" >> $GITHUB_ENV
 
-    - name: Get Authentication Token
-      id: get_token
+    - name: Log Changed Files
       run: |
-        TOKEN=$(curl --location "https://${{ env.HOST }}/v3/security/authenticate" \
-          --header "Authorization: Basic ${{ secrets.REFRESH_TOKEN }}" | jq -r '.result.authentication_token')
-        echo "TOKEN=${TOKEN}" >> $GITHUB_ENV
-      env:
-        REFRESH_TOKEN: ${{ secrets.REFRESH_TOKEN }}
-
-    - name: Get Pipeline IDs
-      id: get_pipelines
-      run: |
-        response=$(curl -k --location "https://${{ env.HOST }}/v3/domains/${{ env.DOMAIN_ID }}/pipelines" \
-          --header "Authorization: Bearer ${{ env.TOKEN }}")
-        echo "API Response: $response"
-        pipelines=$(echo $response | jq -r '.result[] | select(.name | inside("${CHANGED_FILES}")) | "\(.name)=\(.id)"')
-        echo "PIPELINES=${pipelines}" >> $GITHUB_ENV
-
-    - name: Create New Pipeline Versions
-      run: |
-        for pipeline in ${{ env.PIPELINES }}; do
-          name=$(echo $pipeline | cut -d '=' -f 1)
-          id=$(echo $pipeline | cut -d '=' -f 2)
-          query=$(base64 < "domain_1/$name")
-          response=$(curl -k --request POST \
-            --url "https://${{ env.HOST }}/v3/domains/${{ env.DOMAIN_ID }}/pipelines/$id/versions" \
-            --header "Content-Type: application/json" \
-            --header "Authorization: Bearer ${{ env.TOKEN }}" \
-            --data "{\"pipeline_id\":\"$id\",\"type\":\"sql\",\"query\":\"$query\"}")
-          version_id=$(echo $response | jq -r '.result.id')
-          echo "Created version $version_id for pipeline $name"
-
-          # Set the newly created version as active
-          curl -k --request POST \
-            --url "https://${{ env.HOST }}/v3/domains/${{ env.DOMAIN_ID }}/pipelines/$id/versions/$version_id/set-active" \
-            --header "Authorization: Bearer ${{ env.TOKEN }}"
-          echo "Set version $version_id as active for pipeline $name"
-        done
+        echo "Changed files:"
+        echo "$CHANGED_FILES"
