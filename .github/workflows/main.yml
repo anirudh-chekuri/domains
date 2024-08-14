@@ -44,6 +44,8 @@ jobs:
           --header "Authorization: Basic $REFRESH_TOKEN")
         token=$(echo $response | jq -r '.result.authentication_token')
         echo "TOKEN=$token" >> $GITHUB_ENV
+        echo $token
+        echo $REFRESH_TOKEN
 
 
 
