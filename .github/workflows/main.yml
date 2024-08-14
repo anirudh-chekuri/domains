@@ -56,7 +56,7 @@ jobs:
       id: fetch_pipeline_ids
       run: |
         pipelines=$(curl -k --location "https://${{ env.HOST }}/v3/domains/${{ env.DOMAIN_ID }}/pipelines" \
-          --header "Authorization: Bearer ${{ env.TOKEN }}" | jq -r '.result[] | {id: .id, name: .name}')
+          --header "Authorization: Bearer ${{ env.TOKEN }}" | jq -c '.result[]')
         echo "$pipelines" > pipelines.json
         echo "Pipeline JSON: $pipelines"
 
@@ -64,7 +64,7 @@ jobs:
       run: |
         for file in ${{ env.CHANGED_FILES }}; do
           pipeline_name=$(basename "$file" .sql)
-          pipeline_id=$(jq -r --arg name "$pipeline_name" '.[] | select(.name == $name) | .id' pipelines.json)
+          pipeline_id=$(jq -r --arg name "$pipeline_name" 'select(.name == $name) | .id' pipelines.json)
           
           if [ "$pipeline_id" != "null" ]; then
             query=$(base64 < "$file")
