@@ -1,41 +1,84 @@
-name: CI Pipeline
+name: Trigger SQL Pipeline Update
 
 on:
   push:
     paths:
-      - 'domain_1/**'
+      - 'domain_1/**/*.sql'
 
 jobs:
-  process_changes:
+  update-pipeline:
     runs-on: ubuntu-latest
-
     steps:
     - name: Checkout code
-      uses: actions/checkout@v3
-      with:
-        fetch-depth: 0 # Fetch all history to ensure HEAD^ works
+      uses: actions/checkout@v2
 
-    - name: Fetch Full History
-      run: git fetch --unshallow || true
+    - name: Load Configuration
+      id: load_config
+      run: |
+        DOMAIN_ID=$(grep '^domainid=' domain_1/config.txt | cut -d '=' -f 2)
+        HOST=$(grep '^host=' domain_1/config.txt | cut -d '=' -f 2)
+        echo "DOMAIN_ID=${DOMAIN_ID}" >> $GITHUB_ENV
+        echo "HOST=${HOST}" >> $GITHUB_ENV
 
     - name: Determine Changed SQL Files
       id: changed_files
       run: |
-        # Get the latest commit and its parent
-        latest_commit=$(git rev-parse HEAD)
-        parent_commit=$(git rev-parse HEAD^)
-        
-        # Ensure we have valid commits to compare
-        if [ -z "$latest_commit" ] || [ -z "$parent_commit" ]; then
-          echo "Error: Unable to retrieve commits."
-          exit 1
-        fi
+        # Fetch the latest changes
+        git fetch origin
 
         # Get the list of changed SQL files
-        changed_files=$(git diff --name-only --diff-filter=M $parent_commit $latest_commit domain_1/ | grep '\.sql$')
-        echo "CHANGED_FILES=$changed_files" >> $GITHUB_ENV
+        changed_files=$(git diff --name-only HEAD^ HEAD | grep '^domain_1/.*\.sql$')
 
-    - name: Log Changed Files
+        # Initialize a variable to track existing SQL files
+        existing_files=""
+
+        for file in $changed_files; do
+          # Check if the file exists in the previous commit
+          if git ls-tree --name-only HEAD^ | grep -q "^${file}"; then
+            existing_files+="${file} "
+          fi
+        done
+
+        echo "EXISTING_CHANGED_FILES=${existing_files}" >> $GITHUB_ENV
+
+    - name: Get Authentication Token
+      id: get_token
       run: |
-        echo "Changed files:"
-        echo "$CHANGED_FILES"
+        TOKEN=$(curl --location "https://${{ env.HOST }}/v3/security/authenticate" \
+          --header "Authorization: Basic ${{ secrets.REFRESH_TOKEN }}" | jq -r '.result.authentication_token')
+        echo "TOKEN=${TOKEN}" >> $GITHUB_ENV
+      env:
+        REFRESH_TOKEN: ${{ secrets.REFRESH_TOKEN }}
+
+    - name: Get Pipeline IDs
+      id: get_pipelines
+      run: |
+        response=$(curl -k --location "https://${{ env.HOST }}/v3/domains/${{ env.DOMAIN_ID }}/pipelines" \
+          --header "Authorization: Bearer ${{ env.TOKEN }}")
+        echo "API Response: $response"
+        pipelines=$(echo $response | jq -r '.result[] | "\(.name)=\(.id)"')
+        echo "PIPELINES=${pipelines}" >> $GITHUB_ENV
+
+    - name: Create Pipeline Versions for Existing Files
+      run: |
+        for file in ${{ env.EXISTING_CHANGED_FILES }}; do
+          name=$(basename "$file" .sql)
+          pipeline_id=$(echo ${{ env.PIPELINES }} | grep "$name=" | cut -d '=' -f 2)
+          query=$(base64 < "$file")
+          
+          # Create a new pipeline version
+          response=$(curl -k --request POST \
+            --url "https://${{ env.HOST }}/v3/domains/${{ env.DOMAIN_ID }}/pipelines/$pipeline_id/versions" \
+            --header "Content-Type: application/json" \
+            --header "Authorization: Bearer ${{ env.TOKEN }}" \
+            --data "{\"pipeline_id\":\"$pipeline_id\",\"type\":\"sql\",\"query\":\"$query\"}")
+          
+          version_id=$(echo $response | jq -r '.result.id')
+          echo "Created version $version_id for pipeline $name"
+
+          # Set the newly created version as active
+          curl -k --request POST \
+            --url "https://${{ env.HOST }}/v3/domains/${{ env.DOMAIN_ID }}/pipelines/$pipeline_id/versions/$version_id/set-active" \
+            --header "Authorization: Bearer ${{ env.TOKEN }}"
+          echo "Set version $version_id as active for pipeline $name"
+        done
