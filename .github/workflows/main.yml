@@ -2,22 +2,21 @@ name: Trigger SQL Pipeline Update
 
 on:
   push:
+    branches:
+      - main
     paths:
-      - 'domain_1/**'
+      - 'domain_1/*.sql'  
 
 jobs:
   update-pipeline:
     runs-on: ubuntu-latest
+
     steps:
     - name: Checkout code
-      uses: actions/checkout@v2
-
-    - name: Get changed files
-      id: changed-files
-      uses: tj-actions/changed-files@v34
+      uses: actions/checkout@v4
       with:
-        files: |
-          domain_1/*.sql
+        fetch-depth: 0  # Fetch the full history to compare with previous commits
+        persist-credentials: true  # Ensure credentials are persisted
 
     - name: Load Configuration
       id: load_config
@@ -32,59 +31,45 @@ jobs:
       run: |
         TOKEN_RESPONSE=$(curl -k --silent --location "https://${{ env.HOST }}/v3/security/token/access" \
           --header "Authorization: Basic ${{ secrets.REFRESH_TOKEN }}")
-        
         echo "Token API Response: $TOKEN_RESPONSE"
         TOKEN=$(echo $TOKEN_RESPONSE | jq -r '.result.authentication_token')
         echo "TOKEN=$TOKEN" >> $GITHUB_ENV
 
-    - name: Fetch Pipeline IDs
-      id: fetch_pipeline_ids
+    - name: Get changed files
+      id: changed-files
+      uses: tj-actions/changed-files@v44
+      with:
+        files: |
+          domain_1/**/*.sql  # Matches all .sql files under domain_1, including subdirectories
+
+    - name: List changed files
+      if: steps.changed-files.outputs.all_changed_files != ''
       run: |
-        pipelines=$(curl -k --location "https://${{ env.HOST }}/v3/domains/${{ env.DOMAIN_ID }}/pipelines" \
-          --header "Authorization: Bearer ${{ env.TOKEN }}" | jq -r '.result[] | {id: .id, name: .name}')
-        echo "Fetched Pipelines:"
-        echo "$pipelines" > pipelines.json
-        cat pipelines.json
+        echo "Changed SQL files:"
+        for file in ${{ steps.changed-files.outputs.all_changed_files }}; do
+          echo "$file"
+        done
 
     - name: Process Existing Changed Files
-      if: ${{ steps.changed-files.outputs.changed }}
+      if: steps.changed-files.outputs.all_changed_files != ''
       run: |
-        set -e
-        for file in ${{ steps.changed-files.outputs.files }}; do
+        for file in ${{ steps.changed-files.outputs.all_changed_files }}; do
           pipeline_name=$(basename "$file" .sql)
-          echo "Processing file: $file"
-          echo "Extracted pipeline name: $pipeline_name"
-
           pipeline_id=$(jq -r --arg name "$pipeline_name" '.[] | select(.name == $name) | .id' pipelines.json)
-          echo "Pipeline ID: $pipeline_id"
-
+          
           if [ "$pipeline_id" != "null" ]; then
-            echo "Found pipeline ID for $pipeline_name: $pipeline_id"
             query=$(base64 < "$file")
             create_response=$(curl -k --request POST \
               --url "https://${{ env.HOST }}/v3/domains/${{ env.DOMAIN_ID }}/pipelines/$pipeline_id/versions" \
               --header "Content-Type: application/json" \
               --header "Authorization: Bearer ${{ env.TOKEN }}" \
               --data "{\"pipeline_id\": \"$pipeline_id\", \"type\": \"sql\", \"query\": \"$query\"}")
-
-            echo "Create response: $create_response"
+            
             pipeline_version_id=$(echo $create_response | jq -r '.result.id')
-            echo "Pipeline Version ID: $pipeline_version_id"
-
-            if [ -z "$pipeline_version_id" ] || [ "$pipeline_version_id" == "null" ]; then
-              echo "Error: Failed to create a new pipeline version for $pipeline_name."
-              exit 1
-            fi
-
-            activation_response=$(curl -k --request POST \
+            
+            curl -k --request POST \
               --url "https://${{ env.HOST }}/v3/domains/${{ env.DOMAIN_ID }}/pipelines/$pipeline_id/versions/$pipeline_version_id/set-active" \
-              --header "Authorization: Bearer ${{ env.TOKEN }}")
-            echo "Activation response: $activation_response"
-
-            if ! echo "$activation_response" | grep -q "success"; then
-              echo "Error: Failed to activate the pipeline version $pipeline_version_id for $pipeline_name."
-              exit 1
-            fi
+              --header "Authorization: Bearer ${{ env.TOKEN }}"
           else
             echo "Pipeline ID not found for $pipeline_name"
           fi
