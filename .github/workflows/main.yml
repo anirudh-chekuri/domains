@@ -4,7 +4,7 @@ on:
   push:
     branches: [ main ]
     paths:
-      - 'domain_1/*.sql'
+      - 'domain_1/**'
 
 jobs:
   update-pipeline:
@@ -62,25 +62,51 @@ jobs:
         for file in ${{ env.CHANGED_FILES }}; do
           base_filename=$(basename "$file")
           pipeline_name="${base_filename%.sql}"
-          echo $pipeline_name
+          echo "Processing pipeline: $pipeline_name"
+          
           pipeline_id=$(grep -w "$pipeline_name" pipelines.txt | awk '{print $2}')
-          echo $pipeline_id
-          if [ "$pipeline_id" != "null" ]; then
-            echo $file
-            query=$(cat $file | base64)
-            echo $query
-            create_response=$(curl -k --request POST \
-              --url "https://${{ env.HOST }}/v3/domains/${{ env.DOMAIN_ID }}/pipelines/$pipeline_id/versions" \
-              --header "Content-Type: application/json" \
-              --header "Authorization: Bearer ${{ env.TOKEN }}" \
-              --data "{\"pipeline_id\": \"$pipeline_id\", \"type\": \"sql\", \"query\": \"$query\"}")
-            echo $create_response
+          echo "Pipeline ID: $pipeline_id"
+          
+          if [ -n "$pipeline_id" ] && [ "$pipeline_id" != "null" ]; then
+            echo "File to process: $file"
             
-            pipeline_version_id=$(echo $create_response | jq -r '.result.id')
-            
-            curl -k --request POST \
-              --url "https://${{ env.HOST }}/v3/domains/${{ env.DOMAIN_ID }}/pipelines/$pipeline_id/versions/$pipeline_version_id/set-active" \
-              --header "Authorization: Bearer ${{ env.TOKEN }}"
+            # Ensure file exists before encoding
+            if [ -f "$file" ]; then
+              query=$(base64 < "$file" | tr -d '\n')
+              echo "Base64 encoded content length: ${#query}"
+              
+              # Prepare JSON payload
+              payload=$(jq -n \
+                --arg pipeline_id "$pipeline_id" \
+                --arg type "sql" \
+                --arg query "$query" \
+                '{pipeline_id: $pipeline_id, type: $type, query: $query}')
+              
+              echo "Payload: $payload"
+              
+              # Create a new pipeline version
+              create_response=$(curl -k --request POST \
+                --url "https://${{ env.HOST }}/v3/domains/${{ env.DOMAIN_ID }}/pipelines/$pipeline_id/versions" \
+                --header "Content-Type: application/json" \
+                --header "Authorization: Bearer ${{ env.TOKEN }}" \
+                --data "$payload")
+              
+              echo "Create response: $create_response"
+              
+              # Check if creation was successful
+              if echo "$create_response" | jq -e '.result.id' >/dev/null; then
+                pipeline_version_id=$(echo $create_response | jq -r '.result.id')
+                
+                # Set the new version as active
+                curl -k --request POST \
+                  --url "https://${{ env.HOST }}/v3/domains/${{ env.DOMAIN_ID }}/pipelines/$pipeline_id/versions/$pipeline_version_id/set-active" \
+                  --header "Authorization: Bearer ${{ env.TOKEN }}"
+              else
+                echo "Failed to create pipeline version. Response: $create_response"
+              fi
+            else
+              echo "File does not exist: $file"
+            fi
           else
             echo "Pipeline ID not found for $pipeline_name"
           fi
