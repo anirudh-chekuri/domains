@@ -55,7 +55,7 @@ jobs:
     - name: Get Authentication Token
       id: get_token
       run: |
-        TOKEN=$(curl --location "https://${{ env.HOST }}/v3/security/authenticate" \
+        TOKEN=$(curl -k --location "https://${{ env.HOST }}/v3/security/token/access" \
           --header "Authorization: Basic ${{ secrets.REFRESH_TOKEN }}" | jq -r '.result.authentication_token')
         echo "TOKEN=${TOKEN}" >> $GITHUB_ENV
       env:
