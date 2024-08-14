@@ -1,10 +1,1 @@
-wwweewefwwwsqqwfwefefwsfwsdgdswewsdwwwefwfveqvfqfwrgferwefwwewwefwewerwqwfewewshow databases;
-eewshow tables;
-qq
-e
-ewq
-wwee
-rrwsedawewww
-l'wwww
-hhwwdfq
-j
+select * from tableA
