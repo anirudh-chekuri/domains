@@ -38,7 +38,8 @@ jobs:
       run: |
         git fetch origin
         # Get list of changed SQL files
-        changed_files=$(git diff --name-only HEAD~1 HEAD | grep '^domain_1/.*\.sql$' || true)
+        previous_commit=$(git rev-parse HEAD~1) # Get the previous commit hash
+        changed_files=$(git diff --name-only HEAD $previous_commit | grep '^domain_1/.*\.sql$' || true)
         echo "CHANGED_FILES=${changed_files}" >> $GITHUB_ENV
         echo changed_files
         
