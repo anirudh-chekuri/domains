@@ -38,7 +38,7 @@ jobs:
       run: |
         git fetch origin
         changed_files=$(git diff --name-only HEAD^ HEAD | grep '^domain_1/.*\.sql$' || true)
-        echo $changed_files
+        echo "Changed SQL files: $changed_files"
         
         # Initialize a variable to track existing SQL files
         existing_files=""
@@ -51,35 +51,57 @@ jobs:
         done
         
         echo "EXISTING_CHANGED_FILES=${existing_files}" >> $GITHUB_ENV
+        echo "Existing changed SQL files: $existing_files"
 
     - name: Fetch Pipeline IDs
       id: fetch_pipeline_ids
       run: |
         pipelines=$(curl -k --location "https://${{ env.HOST }}/v3/domains/${{ env.DOMAIN_ID }}/pipelines" \
           --header "Authorization: Bearer ${{ env.TOKEN }}" | jq -r '.result[] | {id: .id, name: .name}')
+        echo "Fetched Pipelines:"
         echo "$pipelines" > pipelines.json
-        echo $pipelines
-        
+        cat pipelines.json
+
     - name: Process Existing Changed Files
       if: ${{ env.EXISTING_CHANGED_FILES }}
       run: |
+        set -e  # Exit immediately if any command exits with a non-zero status
+        
         for file in ${{ env.EXISTING_CHANGED_FILES }}; do
           pipeline_name=$(basename "$file" .sql)
+          echo "Processing file: $file"
+          echo "Extracted pipeline name: $pipeline_name"
+
           pipeline_id=$(jq -r --arg name "$pipeline_name" '.[] | select(.name == $name) | .id' pipelines.json)
-          
+          echo "Pipeline ID: $pipeline_id"
+
           if [ "$pipeline_id" != "null" ]; then
+            echo "Found pipeline ID for $pipeline_name: $pipeline_id"
             query=$(base64 < "$file")
             create_response=$(curl -k --request POST \
               --url "https://${{ env.HOST }}/v3/domains/${{ env.DOMAIN_ID }}/pipelines/$pipeline_id/versions" \
               --header "Content-Type: application/json" \
               --header "Authorization: Bearer ${{ env.TOKEN }}" \
               --data "{\"pipeline_id\": \"$pipeline_id\", \"type\": \"sql\", \"query\": \"$query\"}")
-            
+
+            echo "Create response: $create_response"
             pipeline_version_id=$(echo $create_response | jq -r '.result.id')
-            
-            curl -k --request POST \
+            echo "Pipeline Version ID: $pipeline_version_id"
+
+            if [ -z "$pipeline_version_id" ] || [ "$pipeline_version_id" == "null" ]; then
+              echo "Error: Failed to create a new pipeline version for $pipeline_name."
+              exit 1
+            fi
+
+            activation_response=$(curl -k --request POST \
               --url "https://${{ env.HOST }}/v3/domains/${{ env.DOMAIN_ID }}/pipelines/$pipeline_id/versions/$pipeline_version_id/set-active" \
-              --header "Authorization: Bearer ${{ env.TOKEN }}"
+              --header "Authorization: Bearer ${{ env.TOKEN }}")
+            echo "Activation response: $activation_response"
+
+            if ! echo "$activation_response" | grep -q "success"; then
+              echo "Error: Failed to activate the pipeline version $pipeline_version_id for $pipeline_name."
+              exit 1
+            fi
           else
             echo "Pipeline ID not found for $pipeline_name"
           fi
