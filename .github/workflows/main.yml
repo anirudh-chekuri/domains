@@ -12,6 +12,13 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v2
 
+    - name: Get changed files
+      id: changed-files
+      uses: tj-actions/changed-files@v34
+      with:
+        files: |
+          domain_1/*.sql
+
     - name: Load Configuration
       id: load_config
       run: |
@@ -19,39 +26,16 @@ jobs:
         HOST=$(grep '^host=' domain_1/config.txt | cut -d '=' -f 2)
         echo "DOMAIN_ID=${DOMAIN_ID}" >> $GITHUB_ENV
         echo "HOST=${HOST}" >> $GITHUB_ENV
-        
+
     - name: Fetch token
       id: fetch_token
       run: |
         TOKEN_RESPONSE=$(curl -k --silent --location "https://${{ env.HOST }}/v3/security/token/access" \
           --header "Authorization: Basic ${{ secrets.REFRESH_TOKEN }}")
         
-        # Print the full response for debugging
         echo "Token API Response: $TOKEN_RESPONSE"
-        
-        # Extract the token
         TOKEN=$(echo $TOKEN_RESPONSE | jq -r '.result.authentication_token')
         echo "TOKEN=$TOKEN" >> $GITHUB_ENV
-
-    - name: Get the list of changed SQL files
-      id: changed_files
-      run: |
-        git fetch origin
-        changed_files=$(git diff --name-only HEAD^ HEAD | grep '^domain_1/.*\.sql$' || true)
-        echo "Changed SQL files: $changed_files"
-        
-        # Initialize a variable to track existing SQL files
-        existing_files=""
-        
-        for file in $changed_files; do
-          # Check if the file exists in the previous commit
-          if git ls-tree --name-only HEAD^ | grep -q "^${file}"; then
-            existing_files+="${file} "
-          fi
-        done
-        
-        echo "EXISTING_CHANGED_FILES=${existing_files}" >> $GITHUB_ENV
-        echo "Existing changed SQL files: $existing_files"
 
     - name: Fetch Pipeline IDs
       id: fetch_pipeline_ids
@@ -63,11 +47,10 @@ jobs:
         cat pipelines.json
 
     - name: Process Existing Changed Files
-      if: ${{ env.EXISTING_CHANGED_FILES }}
+      if: ${{ steps.changed-files.outputs.changed }}
       run: |
-        set -e  # Exit immediately if any command exits with a non-zero status
-        
-        for file in ${{ env.EXISTING_CHANGED_FILES }}; do
+        set -e
+        for file in ${{ steps.changed-files.outputs.files }}; do
           pipeline_name=$(basename "$file" .sql)
           echo "Processing file: $file"
           echo "Extracted pipeline name: $pipeline_name"
