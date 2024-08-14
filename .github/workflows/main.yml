@@ -11,6 +11,11 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v2
+      with:
+        fetch-depth: 0
+
+    - name: Check Git History
+      run: git log --oneline
 
     - name: Load Configuration
       id: load_config
@@ -25,21 +30,27 @@ jobs:
       run: |
         # Fetch the latest changes
         git fetch origin
+        
+        # Check if there's a previous commit
+        if git rev-parse --verify HEAD^ >/dev/null 2>&1; then
+          # Get the list of changed SQL files
+          changed_files=$(git diff --name-only HEAD^ HEAD | grep '^domain_1/.*\.sql$')
 
-        # Get the list of changed SQL files
-        changed_files=$(git diff --name-only HEAD^ HEAD | grep '^domain_1/.*\.sql$')
+          # Initialize a variable to track existing SQL files
+          existing_files=""
 
-        # Initialize a variable to track existing SQL files
-        existing_files=""
+          for file in $changed_files; do
+            # Check if the file exists in the previous commit
+            if git ls-tree --name-only HEAD^ | grep -q "^${file}"; then
+              existing_files+="${file} "
+            fi
+          done
 
-        for file in $changed_files; do
-          # Check if the file exists in the previous commit
-          if git ls-tree --name-only HEAD^ | grep -q "^${file}"; then
-            existing_files+="${file} "
-          fi
-        done
-
-        echo "EXISTING_CHANGED_FILES=${existing_files}" >> $GITHUB_ENV
+          echo "EXISTING_CHANGED_FILES=${existing_files}" >> $GITHUB_ENV
+        else
+          echo "No previous commit found; setting EXISTING_CHANGED_FILES to empty."
+          echo "EXISTING_CHANGED_FILES=" >> $GITHUB_ENV
+        fi
 
     - name: Get Authentication Token
       id: get_token
