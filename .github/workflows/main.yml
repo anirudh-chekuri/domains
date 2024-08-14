@@ -4,7 +4,7 @@ on:
   push:
     branches: [ main ]
     paths:
-      - 'domain_1/**'
+      - 'domain_1/*.sql'
 
 jobs:
   update-pipeline:
