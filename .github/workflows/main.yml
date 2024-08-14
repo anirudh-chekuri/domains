@@ -20,12 +20,25 @@ jobs:
       run: |
         if [ -f domain_1/config.txt ]; then
           domain_id=$(grep 'domainid=' domain_1/config.txt | cut -d'=' -f2)
-          host=$(grep 'host=' domain_1/config.txt| cut -d'=' -f2)
+          host=$(grep 'host=' domain_1/config.txt | cut -d'=' -f2)
           echo "DOMAIN_ID=$domain_id" >> $GITHUB_ENV
           echo "HOST=$host" >> $GITHUB_ENV
         else
           echo "Configuration file not found!"
           exit 1
+        fi
+
+    - name: Debug Secrets
+      run: |
+        echo "Checking if REFRESH_TOKEN is set..."
+        if [ -z "${{ secrets.REFRESH_TOKEN }}" ]; then
+          echo "REFRESH_TOKEN is not set or is empty"
+          exit 1
+        else
+          echo "REFRESH_TOKEN is set"
+          # Mask the token (optional, but good practice)
+          masked_token=$(echo "${{ secrets.REFRESH_TOKEN }}" | sed 's/./*/g')
+          echo "Masked REFRESH_TOKEN: $masked_token"
         fi
 
     - name: Get Authentication Token
@@ -35,11 +48,16 @@ jobs:
       run: |
         response=$(curl -k --location "https://${{ env.HOST }}/v3/security/token/access" \
           --header "Authorization: Basic $REFRESH_TOKEN")
-        echo $response
-        token=$(echo $response | jq -r '.result.authentication_token')
-        echo "TOKEN=$token" >> $GITHUB_ENV
-        echo $token
-        echo $REFRESH_TOKEN
 
-
-
+        if echo "$response" | jq -e . > /dev/null 2>&1; then
+          token=$(echo $response | jq -r '.result.authentication_token')
+          if [ "$token" != "null" ]; then
+            echo "TOKEN=$token" >> $GITHUB_ENV
+          else
+            echo "Failed to extract token from the response."
+            exit 1
+          fi
+        else
+          echo "Failed to retrieve the token."
+          exit 1
+        fi
