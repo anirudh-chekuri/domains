@@ -12,6 +12,11 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v3
 
+    - name: Fetch full history
+      run: |
+        # Ensure full history is available
+        git fetch --prune --unshallow
+
     - name: Load Configuration
       id: load_config
       run: |
@@ -36,25 +41,28 @@ jobs:
     - name: Get the list of changed SQL files
       id: changed_files
       run: |
-        git fetch origin
-        # Get list of changed SQL files
-        previous_commit=$(git rev-parse HEAD~1) # Get the previous commit hash
-        changed_files=$(git diff --name-only HEAD $previous_commit | grep '^domain_1/.*\.sql$' || true)
-        echo "CHANGED_FILES=${changed_files}" >> $GITHUB_ENV
-        echo changed_files
-        
-        # Initialize a variable to track existing SQL files
-        existing_files=""
-        
-        for file in $changed_files; do
-          # Check if the file exists in the previous commit
-          if git ls-tree --name-only HEAD~1 | grep -q "^${file}"; then
-            existing_files+="${file} "
-          fi
-        done
-        
-        echo "EXISTING_CHANGED_FILES=${existing_files}" >> $GITHUB_ENV
-
+        # Check if there are at least 2 commits
+        if [ $(git rev-list --count HEAD) -gt 1 ]; then
+          # Get list of changed SQL files
+          changed_files=$(git diff --name-only HEAD~1 HEAD | grep '^domain_1/.*\.sql$' || true)
+          
+          # Initialize a variable to track existing SQL files
+          existing_files=""
+          
+          for file in $changed_files; do
+            # Check if the file existed in the previous commit
+            if git ls-tree --name-only HEAD~1 | grep -q "^${file}"; then
+              existing_files+="${file} "
+            fi
+          done
+          
+          echo "EXISTING_CHANGED_FILES=${existing_files}" >> $GITHUB_ENV
+        else
+          echo "No previous commit to compare with." > changed_files.txt
+          echo "EXISTING_CHANGED_FILES=" >> $GITHUB_ENV
+        fi
+        echo "Changed files: ${existing_files}"
+      
     - name: Fetch Pipeline IDs
       id: fetch_pipeline_ids
       run: |
