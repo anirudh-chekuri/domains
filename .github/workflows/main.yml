@@ -59,9 +59,6 @@ jobs:
           --header "Authorization: Bearer ${{ env.TOKEN }}")
         echo "$pipelines" | jq -r '.result[] | "\(.name) \(.id)"' > pipelines.txt
         cat pipelines.txt
-
-    - name: Process Changed Files
-      run: |
         for file in ${{ env.CHANGED_FILES }}; do
           base_filename=$(basename "$file")
           pipeline_name="${base_filename%.sql}"
@@ -70,7 +67,8 @@ jobs:
           echo $pipeline_id
           if [ "$pipeline_id" != "null" ]; then
             echo $file
-            query=$(base64 < "$file")
+            query=$(cat $file | base64)
+            echo $query
             create_response=$(curl -k --request POST \
               --url "https://${{ env.HOST }}/v3/domains/${{ env.DOMAIN_ID }}/pipelines/$pipeline_id/versions" \
               --header "Content-Type: application/json" \
