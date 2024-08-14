@@ -38,6 +38,7 @@ jobs:
       run: |
         git fetch origin
         changed_files=$(git diff --name-only HEAD^ HEAD | grep '^domain_1/.*\.sql$' || true)
+        echo $changed_files
         
         # Initialize a variable to track existing SQL files
         existing_files=""
@@ -57,6 +58,7 @@ jobs:
         pipelines=$(curl -k --location "https://${{ env.HOST }}/v3/domains/${{ env.DOMAIN_ID }}/pipelines" \
           --header "Authorization: Bearer ${{ env.TOKEN }}" | jq -r '.result[] | {id: .id, name: .name}')
         echo "$pipelines" > pipelines.json
+        echo $pipelines
         
     - name: Process Existing Changed Files
       if: ${{ env.EXISTING_CHANGED_FILES }}
