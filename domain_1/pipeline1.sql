@@ -1,1 +1,2 @@
-select * from tableA
+select * from tableA limit 10;
+
