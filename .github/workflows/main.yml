@@ -40,7 +40,7 @@ jobs:
       env:
         REFRESH_TOKEN: ${{ secrets.REFRESH_TOKEN }}
       run: |
-        response=$(curl -k --location "https://${{ env.HOST }}/v3/security/authenticate" \
+        response=$(curl -k --location "https://${{ env.HOST }}/v3/security/token/access" \
           --header "Authorization: Basic $REFRESH_TOKEN")
         token=$(echo $response | jq -r '.result.authentication_token')
         echo "TOKEN=$token" >> $GITHUB_ENV
