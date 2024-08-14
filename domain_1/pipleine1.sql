@@ -1,2 +1,2 @@
-wefwwewwefwewerwqwfewewshow databases;
+rgferwefwwewwefwewerwqwfewewshow databases;
 eewshow tables;
