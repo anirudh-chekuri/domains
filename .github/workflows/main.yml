@@ -28,13 +28,6 @@ jobs:
           exit 1
         fi
 
-    - name: Determine Changed SQL Files
-      id: changed_files
-      run: |
-        git fetch origin
-        changed_files=$(git diff --name-only HEAD^ HEAD | grep '^domain_1/[^/]*$')
-        echo "CHANGED_FILES=$changed_files" >> $GITHUB_ENV
-
     - name: Get Authentication Token
       id: auth
       env:
@@ -42,6 +35,7 @@ jobs:
       run: |
         response=$(curl -k --location "https://${{ env.HOST }}/v3/security/token/access" \
           --header "Authorization: Basic $REFRESH_TOKEN")
+        echo $response
         token=$(echo $response | jq -r '.result.authentication_token')
         echo "TOKEN=$token" >> $GITHUB_ENV
         echo $token
