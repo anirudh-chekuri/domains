@@ -15,7 +15,7 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
       with:
-        fetch-depth: 0  # Fetch the full history to compare with previous commits
+        fetch-depth: 2  # Fetch the full history to compare with previous commits
         persist-credentials: true  # Ensure credentials are persisted
 
     - name: Load Configuration
@@ -40,7 +40,7 @@ jobs:
       uses: tj-actions/changed-files@v44
       with:
         files: |
-          domain_1/**/*.sql  # Matches all .sql files under domain_1, including subdirectories
+          domain_1/*.sql  # Matches all .sql files under domain_1, including subdirectories
 
     - name: List changed files
       if: steps.changed-files.outputs.all_changed_files != ''
