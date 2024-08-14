@@ -3,7 +3,7 @@ name: Print Changed Files
 on:
   push:
     branches:
-      - main  # You can change this to any branch you want to monitor
+      - main  # Adjust as needed
 
 jobs:
   print-changed-files:
@@ -12,10 +12,18 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v3
 
+      - name: Fetch history
+        run: git fetch --prune --unshallow
+
       - name: Get changed files
         id: changed-files
         run: |
-          git diff --name-only HEAD~1 HEAD > changed_files.txt
+          # Check if there are at least 2 commits
+          if [ $(git rev-list --count HEAD) -gt 1 ]; then
+            git diff --name-only HEAD~1 HEAD > changed_files.txt
+          else
+            echo "No previous commit to compare with." > changed_files.txt
+          fi
           cat changed_files.txt
 
       - name: Display changed files
