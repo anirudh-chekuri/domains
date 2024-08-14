@@ -52,20 +52,19 @@ jobs:
         echo "Changed files: $changed_files"
         echo "CHANGED_FILES=${changed_files}" >> $GITHUB_ENV
 
-    - name: Fetch Pipeline ID
-      id: fetch_pipeline_id
+    - name: Fetch Pipeline IDs
+      id: fetch_pipeline_ids
       run: |
-        pipeline=$(curl -k --location "https://${{ env.HOST }}/v3/domains/${{ env.DOMAIN_ID }}/pipelines" \
-          --header "Authorization: Bearer ${{ env.TOKEN }}" | jq -r '{id: .id, name: .name}')
-        echo "$pipeline" > pipeline.json
-        echo "Pipeline JSON: $pipeline"
+        pipelines=$(curl -k --location "https://${{ env.HOST }}/v3/domains/${{ env.DOMAIN_ID }}/pipelines" \
+          --header "Authorization: Bearer ${{ env.TOKEN }}" | jq -r '.result[] | {id: .id, name: .name}')
+        echo "$pipelines" > pipelines.json
+        echo "Pipeline JSON: $pipelines"
 
     - name: Process Changed Files
       run: |
-        echo "Changed files: ${{ env.CHANGED_FILES }}"
         for file in ${{ env.CHANGED_FILES }}; do
           pipeline_name=$(basename "$file" .sql)
-          pipeline_id=$(jq -r --arg name "$pipeline_name" '.id' pipeline.json)
+          pipeline_id=$(jq -r --arg name "$pipeline_name" '.[] | select(.name == $name) | .id' pipelines.json)
           
           if [ "$pipeline_id" != "null" ]; then
             query=$(base64 < "$file")
