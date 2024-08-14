@@ -49,19 +49,8 @@ jobs:
       run: |
         git fetch origin
         changed_files=$(git diff --name-only --diff-filter=d "${FIRST_COMMIT}" "${LAST_COMMIT}" | grep '^domain_1/.*\.sql$' || true)
-        echo $changed_files
-        
-        # Initialize a variable to track existing SQL files
-        existing_files=""
-        
-        for file in $changed_files; do
-          # Check if the file exists in the previous commit
-          if git ls-tree --name-only "${FIRST_COMMIT}" | grep -q "^${file}"; then
-            existing_files+="${file} "
-          fi
-        done
-        
-        echo "EXISTING_CHANGED_FILES=${existing_files}" >> $GITHUB_ENV
+        echo "Changed files: $changed_files"
+        echo "CHANGED_FILES=${changed_files}" >> $GITHUB_ENV
 
     - name: Fetch Pipeline IDs
       id: fetch_pipeline_ids
@@ -71,10 +60,9 @@ jobs:
         echo "$pipelines" > pipelines.json
         echo $pipelines
 
-    - name: Process Existing Changed Files
-      if: ${{ env.EXISTING_CHANGED_FILES }}
+    - name: Process Changed Files
       run: |
-        for file in ${{ env.EXISTING_CHANGED_FILES }}; do
+        for file in ${{ env.CHANGED_FILES }}; do
           pipeline_name=$(basename "$file" .sql)
           pipeline_id=$(jq -r --arg name "$pipeline_name" '.[] | select(.name == $name) | .id' pipelines.json)
           
