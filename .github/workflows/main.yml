@@ -37,57 +37,22 @@ jobs:
       id: changed_files
       run: |
         git fetch origin
-        git diff --name-only HEAD~1 > changed_files.txt
         
-        echo "Changed files between HEAD~1 and HEAD:"
+        # Get the latest commit hash
+        LATEST_COMMIT=$(git log -1 --format="%H")
+        
+        # Get the changed SQL files in the latest commit
+        git diff-tree --no-commit-id --name-only -r $LATEST_COMMIT | grep '^domain_1/[^/]*\.sql$' > changed_files.txt
+        
+        echo "Changed SQL files:"
         cat changed_files.txt
-        
-        # Filter for SQL files directly under domain_1
-        changed_files=$(grep '^domain_1/[^/]*\.sql$' changed_files.txt || true)
-        echo "Filtered SQL files:"
-        echo "$changed_files"
         
         # Initialize a variable to track existing SQL files
         existing_files=""
         
-        for file in $changed_files; do
-          # Check if the file exists in the previous commit
-          if git ls-tree --name-only HEAD~1 | grep -q "^${file}"; then
-            existing_files+="${file} "
-          fi
+        for file in $(cat changed_files.txt); do
+          existing_files+="${file} "
         done
         
         echo "EXISTING_CHANGED_FILES=${existing_files}" >> $GITHUB_ENV
-
-    - name: Fetch Pipeline IDs
-      id: fetch_pipeline_ids
-      run: |
-        pipelines=$(curl -k --location "https://${{ env.HOST }}/v3/domains/${{ env.DOMAIN_ID }}/pipelines" \
-          --header "Authorization: Bearer ${{ env.TOKEN }}" | jq -r '.result[] | {id: .id, name: .name}')
-        echo "$pipelines" > pipelines.json
-        echo $pipelines
-        
-    - name: Process Existing Changed Files
-      if: ${{ env.EXISTING_CHANGED_FILES }}
-      run: |
-        for file in ${{ env.EXISTING_CHANGED_FILES }}; do
-          pipeline_name=$(basename "$file" .sql)
-          pipeline_id=$(jq -r --arg name "$pipeline_name" '.[] | select(.name == $name) | .id' pipelines.json)
-          
-          if [ "$pipeline_id" != "null" ]; then
-            query=$(base64 < "$file")
-            create_response=$(curl -k --request POST \
-              --url "https://${{ env.HOST }}/v3/domains/${{ env.DOMAIN_ID }}/pipelines/$pipeline_id/versions" \
-              --header "Content-Type: application/json" \
-              --header "Authorization: Bearer ${{ env.TOKEN }}" \
-              --data "{\"pipeline_id\": \"$pipeline_id\", \"type\": \"sql\", \"query\": \"$query\"}")
-            
-            pipeline_version_id=$(echo $create_response | jq -r '.result.id')
-            
-            curl -k --request POST \
-              --url "https://${{ env.HOST }}/v3/domains/${{ env.DOMAIN_ID }}/pipelines/$pipeline_id/versions/$pipeline_version_id/set-active" \
-              --header "Authorization: Bearer ${{ env.TOKEN }}"
-          else
-            echo "Pipeline ID not found for $pipeline_name"
-          fi
-        done
+        echo $existing_files
