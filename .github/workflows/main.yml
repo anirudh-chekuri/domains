@@ -4,63 +4,77 @@ on:
   push:
     branches: [ main ]
     paths:
-      - 'domain_1/**'
+      - 'domain_1/*.sql'
 
 jobs:
-  get_files:
-    name: run_on_push
+  update-pipeline:
     runs-on: ubuntu-latest
-    outputs:
-      sql_files: ${{ steps.get_files.outputs.sql_files }}
     steps:
     - name: Checkout code
-      uses: actions/checkout@v2
+      uses: actions/checkout@v3
       with:
         fetch-depth: 0
 
-    - name: Determine changed SQL files
-      id: get_files
-      run: |
-        # Fetch changes between commits
-        changedFiles=$(git diff --name-only --diff-filter=d HEAD~1 HEAD)
-        
-        # Filter for SQL files under domain_1/
-        sqlFiles=$(echo "$changedFiles" | grep '^domain_1/.*\.sql$' || true)
-        
-        # Set output and environment variable
-        echo "sql_files=${sqlFiles}" >> $GITHUB_ENV
-        echo "::set-output name=sql_files::${sqlFiles}"
-
-  update-pipeline:
-    runs-on: ubuntu-latest
-    needs: get_files
-    if: ${{ env.sql_files != '' }}
-    steps:
     - name: Load Configuration
+      id: load_config
       run: |
         DOMAIN_ID=$(grep '^domainid=' domain_1/config.txt | cut -d '=' -f 2)
         HOST=$(grep '^host=' domain_1/config.txt | cut -d '=' -f 2)
         echo "DOMAIN_ID=${DOMAIN_ID}" >> $GITHUB_ENV
         echo "HOST=${HOST}" >> $GITHUB_ENV
 
-    - name: Fetch token
+    - name: Fetch Token
+      id: fetch_token
       run: |
         TOKEN_RESPONSE=$(curl -k --silent --location "https://${{ env.HOST }}/v3/security/token/access" \
           --header "Authorization: Basic ${{ secrets.REFRESH_TOKEN }}")
         
+        # Print the full response for debugging
+        echo "Token API Response: $TOKEN_RESPONSE"
+        
         # Extract the token
         TOKEN=$(echo $TOKEN_RESPONSE | jq -r '.result.authentication_token')
-        echo "TOKEN=${TOKEN}" >> $GITHUB_ENV
+        echo "TOKEN=$TOKEN" >> $GITHUB_ENV
+
+    - name: Determine Commit Range
+      id: determine_commits
+      run: |
+        firstCommit='${{ github.event.before }}'
+        lastCommit='${{ github.sha }}'
+        echo "FIRST_COMMIT=${firstCommit}" >> $GITHUB_ENV
+        echo "LAST_COMMIT=${lastCommit}" >> $GITHUB_ENV
+
+    - name: Get the list of changed SQL files
+      id: changed_files
+      run: |
+        git fetch origin
+        changed_files=$(git diff --name-only --diff-filter=d "${FIRST_COMMIT}" "${LAST_COMMIT}" | grep '^domain_1/.*\.sql$' || true)
+        echo $changed_files
+        
+        # Initialize a variable to track existing SQL files
+        existing_files=""
+        
+        for file in $changed_files; do
+          # Check if the file exists in the previous commit
+          if git ls-tree --name-only "${FIRST_COMMIT}" | grep -q "^${file}"; then
+            existing_files+="${file} "
+          fi
+        done
+        
+        echo "EXISTING_CHANGED_FILES=${existing_files}" >> $GITHUB_ENV
 
     - name: Fetch Pipeline IDs
+      id: fetch_pipeline_ids
       run: |
         pipelines=$(curl -k --location "https://${{ env.HOST }}/v3/domains/${{ env.DOMAIN_ID }}/pipelines" \
           --header "Authorization: Bearer ${{ env.TOKEN }}" | jq -r '.result[] | {id: .id, name: .name}')
         echo "$pipelines" > pipelines.json
+        echo $pipelines
 
-    - name: Process Changed Files
+    - name: Process Existing Changed Files
+      if: ${{ env.EXISTING_CHANGED_FILES }}
       run: |
-        for file in ${{ env.sql_files }}; do
+        for file in ${{ env.EXISTING_CHANGED_FILES }}; do
           pipeline_name=$(basename "$file" .sql)
           pipeline_id=$(jq -r --arg name "$pipeline_name" '.[] | select(.name == $name) | .id' pipelines.json)
           
