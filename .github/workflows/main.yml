@@ -63,7 +63,8 @@ jobs:
     - name: Process Changed Files
       run: |
         for file in ${{ env.CHANGED_FILES }}; do
-          pipeline_name=$(basename "$file" .sql)
+          base_filename=$(basename "$file")
+          pipeline_name="${base_filename%.sql}"
           echo $pipeline_name
           pipeline_id=$(grep -w "$pipeline_name" pipelines.txt | awk '{print $2}')
           echo $pipeline_id
