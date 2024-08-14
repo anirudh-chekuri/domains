@@ -24,7 +24,7 @@ jobs:
       id: changed_files
       run: |
         git fetch origin
-        changed_files=$(git diff --name-only HEAD^ HEAD | grep '^domain_1/[^/]*$')
+        changed_files=$(git diff --name-only --diff-filter=M HEAD^ HEAD domain_1/ | grep '\.sql$')
         echo "CHANGED_FILES=$changed_files" >> $GITHUB_ENV
 
     - name: Get Authentication Token
