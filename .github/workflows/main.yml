@@ -20,12 +20,14 @@ jobs:
       run: |
         DOMAIN_ID=$(grep '^domainid=' domain_1/config.txt | cut -d '=' -f 2)
         HOST=$(grep '^host=' domain_1/config.txt | cut -d '=' -f 2)
-        if [ -z "$DOMAIN_ID" ] || [ -z "$HOST" ]; then
+        ENVIRONMENT_ID=$(grep '^environmentid=' domain_1/config.txt | cut -d '=' -f 2)
+        if [ -z "$DOMAIN_ID" ] || [ -z "$HOST" ] || [ -z "$ENVIRONMENT_ID" ]; then
           echo "Configuration values missing!"
           exit 1
         fi
         echo "DOMAIN_ID=${DOMAIN_ID}" >> $GITHUB_ENV
         echo "HOST=${HOST}" >> $GITHUB_ENV
+        echo "ENVIRONMENT_ID=${ENVIRONMENT_ID}" >> $GITHUB_ENV
 
     - name: Fetch Token
       id: fetch_token
@@ -84,38 +86,60 @@ jobs:
         fi
         echo "$pipelines" | jq -r '.result[] | "\(.name) \(.id)"' > pipelines.txt
         cat pipelines.txt
-        for file in ${{ env.CHANGED_FILES }}; do
+
+    - name: Create or Update Pipelines
+      id: create_or_update_pipelines
+      run: |
+        for file in ${{ env.NEW_FILES }}; do
           base_filename=$(basename "$file")
           pipeline_name="${base_filename%.sql}"
-          echo "Processing $pipeline_name"
+          echo "Processing new pipeline $pipeline_name"
+          
           pipeline_id=$(grep -w "$pipeline_name" pipelines.txt | awk '{print $2}')
-          if [ -n "$pipeline_id" ] && [ "$pipeline_id" != "null" ]; then
-            echo "Pipeline ID for $pipeline_name is $pipeline_id"
-            query=$(cat $file | base64 | tr -d '\n') # Ensure query is a single line
-            payload="{\"pipeline_id\": \"$pipeline_id\", \"type\": \"sql\", \"query\": \"$query\"}"
-            echo "Payload: $payload" # Print payload before sending
-
+          if [ -z "$pipeline_id" ]; then
+            echo "Pipeline $pipeline_name not found. Creating a new pipeline."
             create_response=$(curl -k --request POST \
-              --url "https://${{ env.HOST }}/v3/domains/${{ env.DOMAIN_ID }}/pipelines/$pipeline_id/versions" \
+              --url "https://${{ env.HOST }}/v3/domains/${{ env.DOMAIN_ID }}/pipelines" \
               --header "Content-Type: application/json" \
               --header "Authorization: Bearer ${{ env.TOKEN }}" \
-              --data "$payload")
+              --data "{\"name\": \"$pipeline_name\", \"domain_id\": \"${{ env.DOMAIN_ID }}\", \"environment_id\": \"${{ env.ENVIRONMENT_ID }}\", \"run_job_on_data_plane\": false}")
+
             if [ -z "$create_response" ]; then
-              echo "Pipeline version creation failed"
+              echo "Pipeline creation failed for $pipeline_name"
               exit 1
             fi
-            echo $create_response
-            
-            pipeline_version_id=$(echo $create_response | jq -r '.result.id')
-            if [ -n "$pipeline_version_id" ] && [ "$pipeline_version_id" != "null" ]; then
-              curl -k --request POST \
-                --url "https://${{ env.HOST }}/v3/domains/${{ env.DOMAIN_ID }}/pipelines/$pipeline_id/versions/$pipeline_version_id/set-active" \
-                --header "Authorization: Bearer ${{ env.TOKEN }}" || { echo "Setting pipeline version active failed"; exit 1; }
-            else
-              echo "Version ID extraction failed"
+            echo "Pipeline creation response: $create_response"
+            pipeline_id=$(echo $create_response | jq -r '.result.id')
+            if [ -z "$pipeline_id" ] || [ "$pipeline_id" == "null" ]; then
+              echo "Pipeline ID extraction failed for $pipeline_name"
               exit 1
             fi
           else
-            echo "Pipeline ID not found for $pipeline_name"
+            echo "Pipeline $pipeline_name already exists with ID $pipeline_id. Skipping creation."
+          fi
+
+          query=$(cat $file | base64 | tr -d '\n') # Ensure query is a single line
+          payload="{\"pipeline_id\": \"$pipeline_id\", \"type\": \"sql\", \"query\": \"$query\"}"
+          echo "Payload: $payload" # Print payload before sending
+
+          create_response=$(curl -k --request POST \
+            --url "https://${{ env.HOST }}/v3/domains/${{ env.DOMAIN_ID }}/pipelines/$pipeline_id/versions" \
+            --header "Content-Type: application/json" \
+            --header "Authorization: Bearer ${{ env.TOKEN }}" \
+            --data "$payload")
+          if [ -z "$create_response" ]; then
+            echo "Pipeline version creation failed for $pipeline_name"
+            exit 1
+          fi
+          echo $create_response
+          
+          pipeline_version_id=$(echo $create_response | jq -r '.result.id')
+          if [ -n "$pipeline_version_id" ] && [ "$pipeline_version_id" != "null" ]; then
+            curl -k --request POST \
+              --url "https://${{ env.HOST }}/v3/domains/${{ env.DOMAIN_ID }}/pipelines/$pipeline_id/versions/$pipeline_version_id/set-active" \
+              --header "Authorization: Bearer ${{ env.TOKEN }}" || { echo "Setting pipeline version active failed"; exit 1; }
+          else
+            echo "Version ID extraction failed for $pipeline_name"
+            exit 1
           fi
         done
