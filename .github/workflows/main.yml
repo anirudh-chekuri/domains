@@ -90,6 +90,7 @@ jobs:
     - name: Create or Update Pipelines
       id: create_or_update_pipelines
       run: |
+        # Handle new files
         for file in ${{ env.NEW_FILES }}; do
           base_filename=$(basename "$file")
           pipeline_name="${base_filename%.sql}"
@@ -141,5 +142,42 @@ jobs:
           else
             echo "Version ID extraction failed for $pipeline_name"
             exit 1
+          fi
+        done
+
+        # Handle changed files
+        for file in ${{ env.CHANGED_FILES }}; do
+          base_filename=$(basename "$file")
+          pipeline_name="${base_filename%.sql}"
+          echo "Processing $pipeline_name"
+          pipeline_id=$(grep -w "$pipeline_name" pipelines.txt | awk '{print $2}')
+          if [ -n "$pipeline_id" ] && [ "$pipeline_id" != "null" ]; then
+            echo "Pipeline ID for $pipeline_name is $pipeline_id"
+            query=$(cat $file | base64 | tr -d '\n') # Ensure query is a single line
+            payload="{\"pipeline_id\": \"$pipeline_id\", \"type\": \"sql\", \"query\": \"$query\"}"
+            echo "Payload: $payload" # Print payload before sending
+
+            create_response=$(curl -k --request POST \
+              --url "https://${{ env.HOST }}/v3/domains/${{ env.DOMAIN_ID }}/pipelines/$pipeline_id/versions" \
+              --header "Content-Type: application/json" \
+              --header "Authorization: Bearer ${{ env.TOKEN }}" \
+              --data "$payload")
+            if [ -z "$create_response" ]; then
+              echo "Pipeline version creation failed"
+              exit 1
+            fi
+            echo $create_response
+            
+            pipeline_version_id=$(echo $create_response | jq -r '.result.id')
+            if [ -n "$pipeline_version_id" ] && [ "$pipeline_version_id" != "null" ]; then
+              curl -k --request POST \
+                --url "https://${{ env.HOST }}/v3/domains/${{ env.DOMAIN_ID }}/pipelines/$pipeline_id/versions/$pipeline_version_id/set-active" \
+                --header "Authorization: Bearer ${{ env.TOKEN }}" || { echo "Setting pipeline version active failed"; exit 1; }
+            else
+              echo "Version ID extraction failed"
+              exit 1
+            fi
+          else
+            echo "Pipeline ID not found for $pipeline_name"
           fi
         done
