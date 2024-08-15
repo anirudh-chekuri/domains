@@ -2,7 +2,7 @@ name: Trigger SQL Pipeline Update
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
     paths:
       - 'domain_1/*.sql'
 
@@ -21,163 +21,139 @@ jobs:
         DOMAIN_ID=$(grep '^domainid=' domain_1/config.txt | cut -d '=' -f 2)
         HOST=$(grep '^host=' domain_1/config.txt | cut -d '=' -f 2)
         ENVIRONMENT_ID=$(grep '^environmentid=' domain_1/config.txt | cut -d '=' -f 2)
-        if [ -z "$DOMAIN_ID" ] || [ -z "$HOST" ] || [ -z "$ENVIRONMENT_ID" ]; then
-          echo "Configuration values missing!"
-          exit 1
-        fi
         echo "DOMAIN_ID=${DOMAIN_ID}" >> $GITHUB_ENV
         echo "HOST=${HOST}" >> $GITHUB_ENV
         echo "ENVIRONMENT_ID=${ENVIRONMENT_ID}" >> $GITHUB_ENV
+        echo "Loaded configuration: DOMAIN_ID=${DOMAIN_ID}, HOST=${HOST}, ENVIRONMENT_ID=${ENVIRONMENT_ID}"
 
     - name: Fetch Token
       id: fetch_token
       run: |
         TOKEN_RESPONSE=$(curl -k --silent --location "https://${{ env.HOST }}/v3/security/token/access" \
-          --header "Authorization: Basic ${{ secrets.REFRESH_TOKEN }}")
-        
-        # Print the full response for debugging
+          --header "Authorization: Basic ${{ secrets.REFRESH_TOKEN }}" || { echo "Token fetch failed"; exit 1; })
         echo "Token API Response: $TOKEN_RESPONSE"
-        
-        # Extract the token
-        TOKEN=$(echo $TOKEN_RESPONSE | jq -r '.result.authentication_token')
-        if [ -z "$TOKEN" ] || [ "$TOKEN" == "null" ]; then
-          echo "Token extraction failed"
-          exit 1
-        fi
+        TOKEN=$(echo $TOKEN_RESPONSE | jq -r '.result.authentication_token' || { echo "Token extraction failed"; exit 1; })
         echo "TOKEN=$TOKEN" >> $GITHUB_ENV
+        echo "Fetched authentication token."
 
     - name: Determine Commit Range
       id: determine_commits
       run: |
-        firstCommit='${{ github.event.before }}'
-        lastCommit='${{ github.sha }}'
-        if [ "$firstCommit" == "0000000000000000000000000000000000000000" ]; then
-          firstCommit=$(git rev-list --max-parents=0 HEAD)
-        fi
+        firstCommit="${{ github.event.before }}"
+        lastCommit="${{ github.sha }}"
         echo "FIRST_COMMIT=${firstCommit}" >> $GITHUB_ENV
         echo "LAST_COMMIT=${lastCommit}" >> $GITHUB_ENV
+        echo "Determined commit range: ${firstCommit}..${lastCommit}"
 
-    - name: Get the list of changed and new SQL files
+    - name: Get the list of changed SQL files
       id: changed_files
       run: |
         git fetch origin
-        # List of changed files
-        changed_files=$(git diff --name-only --diff-filter=M "${FIRST_COMMIT}" "${LAST_COMMIT}" | grep '^domain_1/.*\.sql$' || true)
-        echo "Changed files: $changed_files"
+        changed_files=$(git diff --name-only --diff-filter=d "${FIRST_COMMIT}" "${LAST_COMMIT}" | grep '^domain_1/.*\.sql$' || true)
         echo "CHANGED_FILES=${changed_files}" >> $GITHUB_ENV
-        
-        # List of new files
-        new_files=$(git diff --name-only --diff-filter=A "${FIRST_COMMIT}" "${LAST_COMMIT}" | grep '^domain_1/.*\.sql$' || true)
-        if [ -n "$new_files" ]; then
-          echo "New SQL files added in the recent push: $new_files"
-        else
-          echo "No new SQL files added."
-        fi
-        echo "NEW_FILES=${new_files}" >> $GITHUB_ENV
+        echo "Detected changed files: $changed_files"
 
     - name: Fetch Pipeline IDs
       id: fetch_pipeline_ids
       run: |
         pipelines=$(curl -k --location "https://${{ env.HOST }}/v3/domains/${{ env.DOMAIN_ID }}/pipelines" \
-          --header "Authorization: Bearer ${{ env.TOKEN }}")
-        if [ -z "$pipelines" ]; then
-          echo "Failed to fetch pipelines"
-          exit 1
-        fi
+          --header "Authorization: Bearer ${{ env.TOKEN }}" || { echo "Pipeline fetch failed"; exit 1; })
         echo "$pipelines" | jq -r '.result[] | "\(.name) \(.id)"' > pipelines.txt
+        echo "Fetched and stored pipeline IDs:"
         cat pipelines.txt
 
-    - name: Create or Update Pipelines
-      id: create_or_update_pipelines
+    - name: Process SQL files and pipelines
+      id: process_files
       run: |
-        # Handle new files
-        for file in ${{ env.NEW_FILES }}; do
-          base_filename=$(basename "$file")
-          pipeline_name="${base_filename%.sql}"
-          echo "Processing new pipeline $pipeline_name"
-          
-          pipeline_id=$(grep -w "$pipeline_name" pipelines.txt | awk '{print $2}')
-          if [ -z "$pipeline_id" ]; then
-            echo "Pipeline $pipeline_name not found. Creating a new pipeline."
-            create_response=$(curl -k --request POST \
-              --url "https://${{ env.HOST }}/v3/domains/${{ env.DOMAIN_ID }}/pipelines" \
-              --header "Content-Type: application/json" \
-              --header "Authorization: Bearer ${{ env.TOKEN }}" \
-              --data "{\"name\": \"$pipeline_name\", \"domain_id\": \"${{ env.DOMAIN_ID }}\", \"environment_id\": \"${{ env.ENVIRONMENT_ID }}\", \"run_job_on_data_plane\": false}")
+        declare -a created_pipelines=()
+        declare -a updated_pipelines=()
+        declare -a missing_pipelines=()
 
-            if [ -z "$create_response" ]; then
-              echo "Pipeline creation failed for $pipeline_name"
-              exit 1
-            fi
-            echo "Pipeline creation response: $create_response"
-            pipeline_id=$(echo $create_response | jq -r '.result.id')
-            if [ -z "$pipeline_id" ] || [ "$pipeline_id" == "null" ]; then
-              echo "Pipeline ID extraction failed for $pipeline_name"
-              exit 1
-            fi
-          else
-            echo "Pipeline $pipeline_name already exists with ID $pipeline_id. Skipping creation."
-          fi
-
-          query=$(cat $file | base64 | tr -d '\n') # Ensure query is a single line
-          payload="{\"pipeline_id\": \"$pipeline_id\", \"type\": \"sql\", \"query\": \"$query\"}"
-          echo "Payload: $payload" # Print payload before sending
-
-          create_response=$(curl -k --request POST \
-            --url "https://${{ env.HOST }}/v3/domains/${{ env.DOMAIN_ID }}/pipelines/$pipeline_id/versions" \
-            --header "Content-Type: application/json" \
-            --header "Authorization: Bearer ${{ env.TOKEN }}" \
-            --data "$payload")
-          if [ -z "$create_response" ]; then
-            echo "Pipeline version creation failed for $pipeline_name"
-            exit 1
-          fi
-          echo $create_response
-          
-          pipeline_version_id=$(echo $create_response | jq -r '.result.id')
-          if [ -n "$pipeline_version_id" ] && [ "$pipeline_version_id" != "null" ]; then
-            curl -k --request POST \
-              --url "https://${{ env.HOST }}/v3/domains/${{ env.DOMAIN_ID }}/pipelines/$pipeline_id/versions/$pipeline_version_id/set-active" \
-              --header "Authorization: Bearer ${{ env.TOKEN }}" || { echo "Setting pipeline version active failed"; exit 1; }
-          else
-            echo "Version ID extraction failed for $pipeline_name"
-            exit 1
-          fi
-        done
-
-        # Handle changed files
         for file in ${{ env.CHANGED_FILES }}; do
           base_filename=$(basename "$file")
           pipeline_name="${base_filename%.sql}"
-          echo "Processing $pipeline_name"
           pipeline_id=$(grep -w "$pipeline_name" pipelines.txt | awk '{print $2}')
+
           if [ -n "$pipeline_id" ] && [ "$pipeline_id" != "null" ]; then
-            echo "Pipeline ID for $pipeline_name is $pipeline_id"
-            query=$(cat $file | base64 | tr -d '\n') # Ensure query is a single line
+            echo "Updating pipeline '$pipeline_name' (ID: $pipeline_id) with contents of '$file'."
+            query=$(cat $file | base64 | tr -d '\n')
             payload="{\"pipeline_id\": \"$pipeline_id\", \"type\": \"sql\", \"query\": \"$query\"}"
-            echo "Payload: $payload" # Print payload before sending
+            echo "Payload for update: $payload"
 
             create_response=$(curl -k --request POST \
               --url "https://${{ env.HOST }}/v3/domains/${{ env.DOMAIN_ID }}/pipelines/$pipeline_id/versions" \
               --header "Content-Type: application/json" \
               --header "Authorization: Bearer ${{ env.TOKEN }}" \
               --data "$payload")
-            if [ -z "$create_response" ]; then
-              echo "Pipeline version creation failed"
-              exit 1
-            fi
-            echo $create_response
-            
+            echo "Pipeline update response: $create_response"
+
             pipeline_version_id=$(echo $create_response | jq -r '.result.id')
             if [ -n "$pipeline_version_id" ] && [ "$pipeline_version_id" != "null" ]; then
               curl -k --request POST \
                 --url "https://${{ env.HOST }}/v3/domains/${{ env.DOMAIN_ID }}/pipelines/$pipeline_id/versions/$pipeline_version_id/set-active" \
-                --header "Authorization: Bearer ${{ env.TOKEN }}" || { echo "Setting pipeline version active failed"; exit 1; }
+                --header "Authorization: Bearer ${{ env.TOKEN }}"
+              echo "Set pipeline '$pipeline_name' (ID: $pipeline_id) version '$pipeline_version_id' as active."
+              updated_pipelines+=("$pipeline_name ($pipeline_id)")
             else
-              echo "Version ID extraction failed"
-              exit 1
+              echo "Failed to extract version ID for '$pipeline_name' (ID: $pipeline_id)."
             fi
           else
-            echo "Pipeline ID not found for $pipeline_name"
+            echo "Pipeline '$pipeline_name' not found. Creating a new pipeline."
+
+            create_response=$(curl -k --request POST \
+              --url "https://${{ env.HOST }}/v3/domains/${{ env.DOMAIN_ID }}/pipelines" \
+              --header "Content-Type: application/json" \
+              --header "Authorization: Bearer ${{ env.TOKEN }}" \
+              --data "{\"name\": \"$pipeline_name\", \"domain_id\": \"${{ env.DOMAIN_ID }}\", \"environment_id\": \"${{ env.ENVIRONMENT_ID }}\", \"run_job_on_data_plane\": false}")
+
+            echo "Pipeline creation response: $create_response"
+            new_pipeline_id=$(echo $create_response | jq -r '.result.id')
+
+            if [ -n "$new_pipeline_id" ] && [ "$new_pipeline_id" != "null" ]; then
+              echo "Created new pipeline '$pipeline_name' (ID: $new_pipeline_id)."
+              created_pipelines+=("$pipeline_name ($new_pipeline_id)")
+
+              query=$(cat $file | base64 | tr -d '\n')
+              payload="{\"pipeline_id\": \"$new_pipeline_id\", \"type\": \"sql\", \"query\": \"$query\"}"
+              echo "Payload for new pipeline version: $payload"
+
+              version_response=$(curl -k --request POST \
+                --url "https://${{ env.HOST }}/v3/domains/${{ env.DOMAIN_ID }}/pipelines/$new_pipeline_id/versions" \
+                --header "Content-Type: application/json" \
+                --header "Authorization: Bearer ${{ env.TOKEN }}" \
+                --data "$payload")
+              echo "Pipeline version creation response: $version_response"
+
+              new_version_id=$(echo $version_response | jq -r '.result.id')
+              if [ -n "$new_version_id" ] && [ "$new_version_id" != "null" ]; then
+                curl -k --request POST \
+                  --url "https://${{ env.HOST }}/v3/domains/${{ env.DOMAIN_ID }}/pipelines/$new_version_id/versions/$new_version_id/set-active" \
+                  --header "Authorization: Bearer ${{ env.TOKEN }}"
+                echo "Set new pipeline '$pipeline_name' (ID: $new_pipeline_id) version '$new_version_id' as active."
+              else
+                echo "Failed to extract version ID for new pipeline '$pipeline_name' (ID: $new_pipeline_id)."
+              fi
+            else
+              echo "Pipeline creation failed for '$pipeline_name'."
+            fi
           fi
         done
+
+        echo "Processing completed."
+        echo "==================== Summary ===================="
+        echo "Updated pipelines: ${#updated_pipelines[@]}"
+        for pipeline in "${updated_pipelines[@]}"; do
+          echo "  - $pipeline"
+        done
+
+        echo "Newly created pipelines: ${#created_pipelines[@]}"
+        for pipeline in "${created_pipelines[@]}"; do
+          echo "  - $pipeline"
+        done
+
+        missing_pipelines=($(grep -v -f <(echo "$CHANGED_FILES" | xargs -n1 basename | sed 's/.sql$//') pipelines.txt | awk '{print $1 " (" $2 ")"}'))
+        echo "Pipelines without corresponding SQL files: ${#missing_pipelines[@]}"
+        for pipeline in "${missing_pipelines[@]}"; do
+          echo "  - $pipeline"
+        done
+        echo "================================================="
