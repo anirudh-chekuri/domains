@@ -33,8 +33,10 @@ jobs:
         TOKEN_RESPONSE=$(curl -k --silent --location "https://${{ env.HOST }}/v3/security/token/access" \
           --header "Authorization: Basic ${{ secrets.REFRESH_TOKEN }}")
         
+        # Print the full response for debugging
         echo "Token API Response: $TOKEN_RESPONSE"
         
+        # Extract the token
         TOKEN=$(echo $TOKEN_RESPONSE | jq -r '.result.authentication_token')
         if [ -z "$TOKEN" ] || [ "$TOKEN" == "null" ]; then
           echo "Token extraction failed"
@@ -57,23 +59,19 @@ jobs:
       id: changed_files
       run: |
         git fetch origin
-        changed_files=$(git diff --name-only --diff-filter=AM "${FIRST_COMMIT}" "${LAST_COMMIT}" | grep '^domain_1/.*\.sql$' || true)
-        if [ -z "$changed_files" ]; then
-          echo "No SQL files changed or added."
-          exit 0
-        fi
-
-        # Separate new and modified files
-        new_files=$(git diff --name-only --diff-filter=A "${FIRST_COMMIT}" "${LAST_COMMIT}" | grep '^domain_1/.*\.sql$' || true)
-        modified_files=$(git diff --name-only --diff-filter=M "${FIRST_COMMIT}" "${LAST_COMMIT}" | grep '^domain_1/.*\.sql$' || true)
-        
+        # List of changed files
+        changed_files=$(git diff --name-only --diff-filter=M "${FIRST_COMMIT}" "${LAST_COMMIT}" | grep '^domain_1/.*\.sql$' || true)
         echo "Changed files: $changed_files"
-        echo "New SQL files in this push: $new_files"
-        echo "Modified SQL files in this push: $modified_files"
-        
         echo "CHANGED_FILES=${changed_files}" >> $GITHUB_ENV
+        
+        # List of new files
+        new_files=$(git diff --name-only --diff-filter=A "${FIRST_COMMIT}" "${LAST_COMMIT}" | grep '^domain_1/.*\.sql$' || true)
+        if [ -n "$new_files" ]; then
+          echo "New SQL files added in the recent push: $new_files"
+        else
+          echo "No new SQL files added."
+        fi
         echo "NEW_FILES=${new_files}" >> $GITHUB_ENV
-        echo "MODIFIED_FILES=${modified_files}" >> $GITHUB_ENV
 
     - name: Fetch Pipeline IDs
       id: fetch_pipeline_ids
@@ -86,7 +84,7 @@ jobs:
         fi
         echo "$pipelines" | jq -r '.result[] | "\(.name) \(.id)"' > pipelines.txt
         cat pipelines.txt
-        for file in ${{ env.MODIFIED_FILES }}; do
+        for file in ${{ env.CHANGED_FILES }}; do
           base_filename=$(basename "$file")
           pipeline_name="${base_filename%.sql}"
           echo "Processing $pipeline_name"
@@ -95,7 +93,7 @@ jobs:
             echo "Pipeline ID for $pipeline_name is $pipeline_id"
             query=$(cat $file | base64 | tr -d '\n') # Ensure query is a single line
             payload="{\"pipeline_id\": \"$pipeline_id\", \"type\": \"sql\", \"query\": \"$query\"}"
-            echo "Payload: $payload"
+            echo "Payload: $payload" # Print payload before sending
 
             create_response=$(curl -k --request POST \
               --url "https://${{ env.HOST }}/v3/domains/${{ env.DOMAIN_ID }}/pipelines/$pipeline_id/versions" \
