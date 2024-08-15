@@ -1,2 +1,2 @@
-select (*) from tableA limit 100;
+select (*) from tableA limit 100000;
 
