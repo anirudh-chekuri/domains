@@ -1,2 +1,2 @@
-use databaseA;
+use database A;
 show tables;

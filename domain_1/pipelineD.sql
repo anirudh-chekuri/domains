@@ -1,0 +1,2 @@
+use databaseA;
+show tables;
