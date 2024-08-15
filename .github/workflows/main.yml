@@ -50,8 +50,9 @@ jobs:
       run: |
         git fetch origin
         changed_files=$(git diff --name-only --diff-filter=d "${FIRST_COMMIT}" "${LAST_COMMIT}" | grep '^domain_1/.*\.sql$' || true)
-        echo "CHANGED_FILES=${changed_files}" >> $GITHUB_ENV
-        echo "Detected changed files: $changed_files"
+        changed_files_formatted=$(echo "$changed_files" | tr '\n' ' ')
+        echo "CHANGED_FILES=$changed_files_formatted" >> $GITHUB_ENV
+        echo "Detected changed files: $changed_files"        
 
     - name: Fetch Pipeline IDs
       id: fetch_pipeline_ids
