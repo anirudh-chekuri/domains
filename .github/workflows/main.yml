@@ -168,13 +168,5 @@ jobs:
         else
           echo "No new pipelines created."
         fi
-
-        if [ "${#missing_pipelines[@]}" -gt 0 ]; then
-          echo "Pipelines without corresponding SQL files: ${#missing_pipelines[@]}"
-          for pipeline in "${missing_pipelines[@]}"; do
-            echo "  - $pipeline"
-          done
-        else
-          echo "All pipelines have corresponding SQL files."
-        fi
+        
         echo "================================================="
