@@ -91,7 +91,7 @@ jobs:
             pipeline_version_id=$(echo $create_response | jq -r '.result.id')
             if [ -n "$pipeline_version_id" ] && [ "$pipeline_version_id" != "null" ]; then
               curl -k --request POST \
-                --url "https://${{ env.HOST }}/v3/domains/${{ env.DOMAIN_ID }}/pipelines/$pipeline_id/versions/$pipeline_version_id/set-active" \
+                --url "https://${{ env.HOST }}/v3/domains/${{ env.DOMAIN_ID }}/pipelines/$pipeline_version_id/versions/$pipeline_version_id/set-active" \
                 --header "Authorization: Bearer ${{ env.TOKEN }}"
               echo "Set pipeline '$pipeline_name' (ID: $pipeline_id) version '$pipeline_version_id' as active."
               updated_pipelines+=("$pipeline_name ($pipeline_id)")
@@ -140,21 +140,41 @@ jobs:
           fi
         done
 
+        # Identify pipelines without corresponding SQL files
+        while IFS= read -r line; do
+          pipeline_name=$(echo "$line" | awk '{print $1}')
+          pipeline_id=$(echo "$line" | awk '{print $2}')
+          if ! grep -q "$pipeline_name.sql" <<< "${{ env.CHANGED_FILES }}"; then
+            missing_pipelines+=("$pipeline_name ($pipeline_id)")
+          fi
+        done < pipelines.txt
+
         echo "Processing completed."
         echo "==================== Summary ===================="
-        echo "Updated pipelines: ${#updated_pipelines[@]}"
-        for pipeline in "${updated_pipelines[@]}"; do
-          echo "  - $pipeline"
-        done
+        if [ "${#updated_pipelines[@]}" -gt 0 ]; then
+          echo "Updated pipelines: ${#updated_pipelines[@]}"
+          for pipeline in "${updated_pipelines[@]}"; do
+            echo "  - $pipeline"
+          done
+        else
+          echo "No pipelines updated."
+        fi
 
-        echo "Newly created pipelines: ${#created_pipelines[@]}"
-        for pipeline in "${created_pipelines[@]}"; do
-          echo "  - $pipeline"
-        done
+        if [ "${#created_pipelines[@]}" -gt 0 ]; then
+          echo "Newly created pipelines: ${#created_pipelines[@]}"
+          for pipeline in "${created_pipelines[@]}"; do
+            echo "  - $pipeline"
+          done
+        else
+          echo "No new pipelines created."
+        fi
 
-        missing_pipelines=($(grep -v -f <(echo "$CHANGED_FILES" | xargs -n1 basename | sed 's/.sql$//') pipelines.txt | awk '{print $1 " (" $2 ")"}'))
-        echo "Pipelines without corresponding SQL files: ${#missing_pipelines[@]}"
-        for pipeline in "${missing_pipelines[@]}"; do
-          echo "  - $pipeline"
-        done
+        if [ "${#missing_pipelines[@]}" -gt 0 ]; then
+          echo "Pipelines without corresponding SQL files: ${#missing_pipelines[@]}"
+          for pipeline in "${missing_pipelines[@]}"; do
+            echo "  - $pipeline"
+          done
+        else
+          echo "All pipelines have corresponding SQL files."
+        fi
         echo "================================================="
