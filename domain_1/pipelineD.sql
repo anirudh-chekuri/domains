@@ -1,2 +1,0 @@
-use databaseA;
-show tables;
