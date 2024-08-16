@@ -91,7 +91,7 @@ jobs:
             pipeline_version_id=$(echo $create_response | jq -r '.result.id')
             if [ -n "$pipeline_version_id" ] && [ "$pipeline_version_id" != "null" ]; then
               curl -k --request POST \
-                --url "https://${{ env.HOST }}/v3/domains/${{ env.DOMAIN_ID }}/pipelines/$pipeline_version_id/versions/$pipeline_version_id/set-active" \
+                --url "https://${{ env.HOST }}/v3/domains/${{ env.DOMAIN_ID }}/pipelines/$pipeline_id/versions/$pipeline_version_id/set-active" \
                 --header "Authorization: Bearer ${{ env.TOKEN }}"
               echo "Set pipeline '$pipeline_name' (ID: $pipeline_id) version '$pipeline_version_id' as active."
               updated_pipelines+=("$pipeline_name ($pipeline_id)")
