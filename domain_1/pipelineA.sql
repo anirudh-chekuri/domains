@@ -1,2 +1,2 @@
-use database ABCD;
+use database ABCDEF;
 show tables;
