@@ -1,0 +1,12 @@
+name: NSLookup Test
+
+on:
+  workflow_dispatch: # Manual trigger
+
+jobs:
+  nslookup:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Perform nslookup
+      run: nslookup google.com
